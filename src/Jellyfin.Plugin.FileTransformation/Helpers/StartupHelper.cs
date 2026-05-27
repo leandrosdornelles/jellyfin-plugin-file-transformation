@@ -39,22 +39,56 @@ namespace Jellyfin.Plugin.FileTransformation.Helpers
             set => s_webStaticFilesFileProvider = value;
         }
 
+        private static T? GetStartupFieldValue<T>(object instance, string fieldName)
+            where T : class
+        {
+            const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+            FieldInfo? fieldInfo = instance.GetType().GetField(fieldName, Flags);
+            if (fieldInfo?.GetValue(instance) is T namedValue)
+            {
+                return namedValue;
+            }
+
+            foreach (FieldInfo candidateFieldInfo in instance.GetType().GetFields(Flags))
+            {
+                if (candidateFieldInfo.GetValue(instance) is T typedValue)
+                {
+                    return typedValue;
+                }
+            }
+
+            return null;
+        }
+
         // When updating Jellyfin version ensure this function is updated to match the targeted version of Jellyfin.
         internal static bool Patch_Startup_Configure(IApplicationBuilder app, IWebHostEnvironment env,
             IConfiguration appConfig, ref object __instance)
         {
-            Assembly? jellyfinApiAssembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(x => x.FullName?.Contains("Jellyfin.Api") ?? false);
-            
-            FieldInfo? serverConfigurationManagerInfo = __instance.GetType().GetField("_serverConfigurationManager", BindingFlags.Instance | BindingFlags.NonPublic) ?? throw new ArgumentNullException("__instance.GetType().GetField(\"_serverConfigurationManager\", BindingFlags.Instance | BindingFlags.NonPublic)");
-            FieldInfo? serverApplicationHostInfo = __instance.GetType().GetField("_serverApplicationHost", BindingFlags.Instance | BindingFlags.NonPublic) ?? throw new ArgumentNullException("__instance.GetType().GetField(\"_serverApplicationHost\", BindingFlags.Instance | BindingFlags.NonPublic)");
+            try
+            {
+                return Patch_Startup_ConfigureCore(app, env, appConfig, ref __instance);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+            {
+                app.ApplicationServices.GetService<ILogger<FileTransformationPlugin>>()
+                    ?.LogError(ex, "[FileTransformation] Unable to patch Startup.Configure. Running original Jellyfin startup; file transforms are disabled.");
+                return true;
+            }
+        }
 
-            IServerConfigurationManager? serverConfigurationManager = serverConfigurationManagerInfo?.GetValue(__instance) as IServerConfigurationManager;
-            IServerApplicationHost? serverApplicationHost = serverApplicationHostInfo?.GetValue(__instance) as IServerApplicationHost;
+        private static bool Patch_Startup_ConfigureCore(IApplicationBuilder app, IWebHostEnvironment env,
+            IConfiguration appConfig, ref object __instance)
+        {
+            Assembly? jellyfinApiAssembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(x => x.FullName?.Contains("Jellyfin.Api") ?? false);
+            ILogger<FileTransformationPlugin>? logger = app.ApplicationServices.GetService<ILogger<FileTransformationPlugin>>();
+
+            IServerConfigurationManager? serverConfigurationManager = GetStartupFieldValue<IServerConfigurationManager>(__instance, "_serverConfigurationManager");
+            IServerApplicationHost? serverApplicationHost = GetStartupFieldValue<IServerApplicationHost>(__instance, "_serverApplicationHost");
 
             if (serverConfigurationManager == null || serverApplicationHost == null)
             {
-                app.ApplicationServices.GetRequiredService<ILogger<FileTransformationPlugin>>()
-                    .LogError(new InvalidOperationException($"Patch could not find _serverConfigurationManager or _serverApplicationHost. Please open an issue on https://github.com/IAmParadox27/jellyfin-plugin-file-transformation and uninstall File Transformation plugin manually from the install directory."), $"An error occurred while patching Startup.Configure. Running original function, file transforms will be disabled.");
+                logger?.LogError(new InvalidOperationException("Patch could not find _serverConfigurationManager or _serverApplicationHost."), "[FileTransformation] Running original Startup.Configure; file transforms are disabled.");
                 return true;
             }
             
@@ -96,13 +130,17 @@ namespace Jellyfin.Plugin.FileTransformation.Helpers
 
                 mainApp.UseCors();
 
+                mainApp.UseRequestLocalization();
+
                 if (config.RequireHttps && serverApplicationHost.ListenWithHttps)
                 {
                     mainApp.UseHttpsRedirection();
                 }
 
-                // This must be injected before any path related middleware.
-                mainApp.UsePathTrim();
+                if (!(JellyfinVersionAttribute.GetVersion()?.StartsWith("12.", StringComparison.OrdinalIgnoreCase) ?? false))
+                {
+                    mainApp.UsePathTrim();
+                }
                 
                 if (appConfig.HostWebClient())
                 {

@@ -130,7 +130,7 @@ namespace Jellyfin.Plugin.FileTransformation
                 return null;
             };
             
-            PatchHelper.SetupPatches();
+            PatchHelper.SetupPatches(logger);
         }
     }
 }

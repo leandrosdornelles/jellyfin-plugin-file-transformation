@@ -8,7 +8,19 @@ namespace Jellyfin.Plugin.FileTransformation.Extensions
     {
         private static Type? GetExtensionType(string name)
         {
-            return AppDomain.CurrentDomain.GetAssemblies().SelectMany(assembly => assembly.GetTypes()).FirstOrDefault(type => type.Name == name);
+            return AppDomain.CurrentDomain.GetAssemblies().SelectMany(GetLoadableTypes).FirstOrDefault(type => type.Name == name);
+        }
+
+        private static IEnumerable<Type> GetLoadableTypes(Assembly assembly)
+        {
+            try
+            {
+                return assembly.GetTypes();
+            }
+            catch (ReflectionTypeLoadException ex)
+            {
+                return ex.Types.OfType<Type>();
+            }
         }
         
         public static void UseBaseUrlRedirection(this IApplicationBuilder app)
