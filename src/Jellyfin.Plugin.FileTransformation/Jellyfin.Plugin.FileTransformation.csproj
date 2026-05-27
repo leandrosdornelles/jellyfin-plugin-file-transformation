@@ -30,7 +30,7 @@ This plugin is based on a Pull Request (https://github.com/jellyfin/jellyfin/pul
       <PackageReference Include="Jellyfin.Data" Version="$(JellyfinNugetVersion)" />
       <PackageReference Include="Jellyfin.Extensions" Version="$(JellyfinNugetVersion)" />
 
-      <PackageReference Include="Lib.Harmony" Version="2.4.0" GeneratePathProperty="true" />
+      <PackageReference Include="Lib.Harmony" Version="2.4.2" GeneratePathProperty="true" />
 
       <PackageReference Include="prometheus-net" Version="8.2.1" />
       <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.1" />
